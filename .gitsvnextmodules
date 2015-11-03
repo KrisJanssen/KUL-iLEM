@@ -1,0 +1,9 @@
+[submodule "micromanager"]
+	path = micromanager
+	owner = /
+	url = https://valelab.ucsf.edu/svn/micromanager2/trunk
+	revision = 15836
+	branch = /
+	fetch = :refs/remotes/git-svn
+	remote = svn
+	type = dir
