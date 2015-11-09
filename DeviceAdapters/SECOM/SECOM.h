@@ -83,13 +83,36 @@ public:
 	bool ReadGCSAnswer(std::vector<std::string>& answer, int nExpectedLines = -1);
 	int GetLastError() const { return lastError_; };
 
-private:
-	std::string port_;
-	bool initialized_;
-	bool portAvailable_;
-	int lastError_;
-	bool isSerialBusy_;
+	int LoadDLL(const std::string& dllName);
+	//int ConnectInterface(const std::string& interfaceType, const std::string& interfaceParameter);
+	void CloseAndUnload();
 
+private:
+	typedef int (WINAPI *FP_CloseConnection) (int);
+	typedef int (WINAPI *FP_EnumerateUSB) (char*, long, const char*);
+	typedef int (WINAPI *FP_ConnectUSB) (const char*);
+	typedef int (WINAPI *FP_GcsCommandset) (int, const char*);
+	typedef int (WINAPI *FP_GcsGetAnswer) (int, char*, int);
+
+	FP_CloseConnection CloseConnection_;
+	FP_EnumerateUSB EnumerateUSB_;
+	FP_ConnectUSB ConnectUSB_;
+	FP_GcsCommandset GcsCommandset_;
+	FP_GcsGetAnswer GcsGetAnswer_;
+
+	void* LoadDLLFunc(const char* funcName);
+	int ConnectUSB(const std::string& interfaceParameter);
+
+	std::string port_, dllName_, dllPrefix_, interfaceParameter_;
+	bool initialized_, portAvailable_, isSerialBusy_;
+	int lastError_, ID_;
+
+
+#ifdef WIN32
+	HMODULE module_;
+#else
+	void* module_;
+#endif
 };
 
 class CSECOMStageXY : public CXYStageBase<CSECOMStageXY>

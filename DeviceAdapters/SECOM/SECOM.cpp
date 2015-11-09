@@ -54,10 +54,12 @@ MODULE_API MM::Device* CreateDevice(const char* deviceName)
 	}
 	else if (strcmp(deviceName, g_DeviceNameSECOMSampleXY) == 0)
 	{
+		// The addresses used here are hard-wired values of the setup.
 		return new CSECOMStageXY(true, '4', '5');
 	}
 	else if (strcmp(deviceName, g_DeviceNameSECOMObjectiveXY) == 0)
 	{
+		// The addresses used here are hard-wired values of the setup.
 		return new CSECOMStageXY(false, '1', '2');
 	}
 	else if (strcmp(deviceName, g_DeviceNameSECOMObjectiveZ) == 0)
@@ -77,9 +79,11 @@ MODULE_API void DeleteDevice(MM::Device* pDevice)
   For the SECOM platform, one E-861 controller acts as the master device in a 5 controller daisy chain.
   This configuration can be abstracted by using the "Hub" arrangement in Micro-Manager.
 */
-CSECOMStageHub::CSECOMStageHub() :
-	initialized_(false),
-	isSerialBusy_(false)
+CSECOMStageHub::CSECOMStageHub()
+	: interfaceParameter_("PI E-861 PiezoWalk(R) Controller SN 0112000802")
+	, dllName_("PI_GCS2_DLL.dll")
+	, initialized_(false)
+	, isSerialBusy_(false)
 {
 	portAvailable_ = false;
 
@@ -95,8 +99,8 @@ CSECOMStageHub::CSECOMStageHub() :
 	  we hook up a property action, i.e. a method that will be called when the property
 	  value is requested or updated.
 	*/
-	CPropertyAction* pAct = new CPropertyAction(this, &CSECOMStageHub::OnPort);
-	CreateProperty(MM::g_Keyword_Port, "Undefined", MM::String, false, pAct, true);
+	//CPropertyAction* pAct = new CPropertyAction(this, &CSECOMStageHub::OnPort);
+	//CreateProperty(MM::g_Keyword_Port, "Undefined", MM::String, false, pAct, true);
 }
 
 CSECOMStageHub::~CSECOMStageHub()
@@ -115,7 +119,7 @@ bool CSECOMStageHub::Busy()
 	return false;
 }
 
-// TODO: document this better...
+// TODO: implement properly...
 MM::DeviceDetectionStatus CSECOMStageHub::DetectDevice(void)
 {
 	// If the device is initialized already, return a positive result. No need to do the other stuff.
@@ -125,64 +129,93 @@ MM::DeviceDetectionStatus CSECOMStageHub::DetectDevice(void)
 	// The device is not initialized yet so initially we set a negative result.
 	MM::DeviceDetectionStatus result = MM::Misconfigured;
 
-	// Reserve space for the controller answer.
-	char answerTO[MM::MaxStrLength];
+	//// Reserve space for the controller answer.
+	//char answerTO[MM::MaxStrLength];
 
-	try
-	{
-		std::string portLowerCase = port_;
+	//try
+	//{
+	//	std::string portLowerCase = port_;
 
-		// Iterate the string character by character and convert to lowercase.
-		for (std::string::iterator its = portLowerCase.begin(); its != portLowerCase.end(); ++its)
-		{
-			*its = (char)tolower(*its);
-		}
+	//	// Iterate the string character by character and convert to lowercase.
+	//	for (std::string::iterator its = portLowerCase.begin(); its != portLowerCase.end(); ++its)
+	//	{
+	//		*its = (char)tolower(*its);
+	//	}
 
 
-		if (0 < portLowerCase.length() && 0 != portLowerCase.compare("undefined") && 0 != portLowerCase.compare("unknown"))
-		{
-			result = MM::CanNotCommunicate;
+	//	if (0 < portLowerCase.length() && 0 != portLowerCase.compare("undefined") && 0 != portLowerCase.compare("unknown"))
+	//	{
+	//		result = MM::CanNotCommunicate;
 
-			// record the default answer time out
-			GetCoreCallback()->GetDeviceProperty(port_.c_str(), "AnswerTimeout", answerTO);
+	//		// record the default answer time out
+	//		GetCoreCallback()->GetDeviceProperty(port_.c_str(), "AnswerTimeout", answerTO);
 
-			GetCoreCallback()->SetDeviceProperty(port_.c_str(), MM::g_Keyword_Handshaking, "Off");
-			GetCoreCallback()->SetDeviceProperty(port_.c_str(), MM::g_Keyword_BaudRate, "115200");
-			GetCoreCallback()->SetDeviceProperty(port_.c_str(), MM::g_Keyword_StopBits, "1");
-			GetCoreCallback()->SetDeviceProperty(port_.c_str(), "AnswerTimeout", "500.0");
-			GetCoreCallback()->SetDeviceProperty(port_.c_str(), "DelayBetweenCharsMs", "0");
+	//		GetCoreCallback()->SetDeviceProperty(port_.c_str(), MM::g_Keyword_Handshaking, "Off");
+	//		GetCoreCallback()->SetDeviceProperty(port_.c_str(), MM::g_Keyword_BaudRate, "115200");
+	//		GetCoreCallback()->SetDeviceProperty(port_.c_str(), MM::g_Keyword_StopBits, "1");
+	//		GetCoreCallback()->SetDeviceProperty(port_.c_str(), "AnswerTimeout", "500.0");
+	//		GetCoreCallback()->SetDeviceProperty(port_.c_str(), "DelayBetweenCharsMs", "0");
 
-			MM::Device* pS = GetCoreCallback()->GetDevice(this, port_.c_str());
-			pS->Initialize();
+	//		MM::Device* pS = GetCoreCallback()->GetDevice(this, port_.c_str());
+	//		pS->Initialize();
 
-			// to succeed must reach here....
-			result = MM::CanCommunicate;
+	//		// to succeed must reach here....
+	//		result = MM::CanCommunicate;
 
-			pS->Shutdown();
-			// always restore the AnswerTimeout to the default
-			GetCoreCallback()->SetDeviceProperty(port_.c_str(), "AnswerTimeout", answerTO);
+	//		pS->Shutdown();
+	//		// always restore the AnswerTimeout to the default
+	//		GetCoreCallback()->SetDeviceProperty(port_.c_str(), "AnswerTimeout", answerTO);
 
-		}
-	}
-	catch (...)
-	{
-		LogMessage("Exception in DetectDevice!", false);
-	}
+	//	}
+	//}
+	//catch (...)
+	//{
+	//	LogMessage("Exception in DetectDevice!", false);
+	//}
 
-	return result;
+	//return result;
+
+	return MM::CanCommunicate;
 }
 
 int CSECOMStageHub::Initialize()
 {
+	if (initialized_)
+		return DEVICE_OK;
+
 	// Set the name of the device.
 	int ret = CreateProperty(MM::g_Keyword_Name, g_DeviceNameSECOMHub, MM::String, true);
 
+	ret = LoadDLL(dllName_);
+
+	if (ret != DEVICE_OK)
+	{
+		LogMessage(std::string("Cannot load dll ") + dllName_);
+		Shutdown();
+		return ret;
+	}
+
+	ret = ConnectUSB(interfaceParameter_);
+	
+	if (ret != DEVICE_OK)
+	{
+		LogMessage("Cannot connect");
+		Shutdown();
+		return ret;
+	}
+
+	initialized_ = true;
+
 	// We will query the device ID. Reserve space for it.
-	std::vector<std::string> answer;
+	//std::vector<std::string> answer;
+
+	char answer[MM::MaxStrLength];
 
 	// Check that we have a controller by querying it's ID.
 	try {
-		GCSCommandWithAnswer("*IDN?", answer);
+		//GCSCommandWithAnswer("*IDN?", answer);
+		GcsCommandset_(ID_, "*IDN?");
+		GcsGetAnswer_(ID_, answer, 1024);
 	}
 	catch (...)
 	{
@@ -190,8 +223,8 @@ int CSECOMStageHub::Initialize()
 	}
 
 	// TODO: Better check.
-	if (answer[0] != "(")
-		return ret;
+	//if (answer[0] != "(")
+	//	return ret;
 
 	// turn off verbose serial debug messages
 	//GetCoreCallback()->SetDeviceProperty(port_.c_str(), "Verbose", "0");
@@ -331,6 +364,90 @@ bool CSECOMStageHub::ReadGCSAnswer(std::vector<std::string>& answer, int nExpect
 	if ((unsigned)nExpectedLines >= 0 && answer.size() != (unsigned)nExpectedLines)
 		return false;
 	return true;
+}
+
+int CSECOMStageHub::LoadDLL(const std::string & dllName)
+{
+	dllPrefix_ = "PI_";
+
+#ifdef WIN32
+	module_ = LoadLibrary(dllName.c_str());
+#else
+	module_ = dlopen(dllName.c_str(), RTLD_LAZY);
+#endif
+	if (module_ == NULL)
+	{
+		printf("load module failed\n");
+		//return ERR_DLL_PI_DLL_NOT_FOUND;
+		return DEVICE_ERR;
+	}
+
+	CloseConnection_ = (FP_CloseConnection)LoadDLLFunc("CloseConnection");
+	EnumerateUSB_ = (FP_EnumerateUSB)LoadDLLFunc("EnumerateUSB");
+	ConnectUSB_ = (FP_ConnectUSB)LoadDLLFunc("ConnectUSB");
+	GcsCommandset_ = (FP_GcsCommandset)LoadDLLFunc("GcsCommandset");
+	return DEVICE_OK;
+}
+
+void CSECOMStageHub::CloseAndUnload()
+{
+	if (module_ == NULL)
+		return;
+
+	if (ID_ >= 0 && CloseConnection_ != NULL)
+		CloseConnection_(ID_);
+
+	ID_ = -1;
+
+#ifdef WIN32
+	FreeLibrary(module_);
+	module_ = NULL;
+#else
+#endif
+}
+
+void* CSECOMStageHub::LoadDLLFunc(const char * funcName)
+{
+#ifdef WIN32
+	return GetProcAddress(module_, (dllPrefix_ + funcName).c_str());
+#else
+	return(dlsym(module_, (dllPrefix_ + funcName).c_str()));
+#endif
+}
+
+int CSECOMStageHub::ConnectUSB(const std::string & interfaceParameter)
+{
+	if (ConnectUSB_ == NULL || EnumerateUSB_ == NULL)
+		return DEVICE_NOT_SUPPORTED;
+
+	char szDevices[128 * 80 + 1];
+	int nrDevices = EnumerateUSB_(szDevices, 128 * 80, NULL);
+	if (nrDevices < 0)
+		//return TranslateError(nrDevices);
+		return -1;
+	if (nrDevices == 0)
+		return DEVICE_NOT_CONNECTED;
+
+	std::string deviceName;
+	if (interfaceParameter_.empty())
+	{
+		if (nrDevices != 1)
+			//return ERR_DLL_PI_INVALID_INTERFACE_PARAMETER;
+			return -1;
+		deviceName = szDevices;
+	}
+	else
+	{
+		//deviceName = FindDeviceNameInUSBList(szDevices, interfaceParameter);
+	}
+	if (deviceName.empty())
+		return DEVICE_NOT_CONNECTED;
+
+	ID_ = ConnectUSB_(deviceName.c_str());
+	if (ID_<0)
+		return DEVICE_NOT_CONNECTED;
+
+	return DEVICE_OK;
 }
 
 int CSECOMStageHub::OnPort(MM::PropertyBase* pProp, MM::ActionType pAct)
@@ -672,7 +789,14 @@ CSECOMStageXY::~CSECOMStageXY()
 
 void CSECOMStageXY::GetName(char* name) const
 {
-	CDeviceUtils::CopyLimitedString(name, g_DeviceNameSECOMSampleXY);
+	if (supportsPositionFeedback_)
+	{
+		CDeviceUtils::CopyLimitedString(name, g_DeviceNameSECOMSampleXY);
+	}
+	else
+	{
+		CDeviceUtils::CopyLimitedString(name, g_DeviceNameSECOMObjectiveXY);
+	}
 }
 
 int CSECOMStageXY::Initialize()
@@ -684,14 +808,28 @@ int CSECOMStageXY::Initialize()
 	char hubLabel[MM::MaxStrLength];
 	hub->GetLabel(hubLabel);
 	SetParentID(hubLabel); // for backward comp.
+	int ret;
 
+	if (supportsPositionFeedback_)
+	{
+		ret = CreateProperty(MM::g_Keyword_Description, "SECOM XY Stage w Feedback", MM::String, true);
+		assert(DEVICE_OK == ret);
 
-	int ret = CreateProperty(MM::g_Keyword_Description, "SECOM XY Stage", MM::String, true);
-	assert(DEVICE_OK == ret);
+		// Name
+		ret = CreateProperty(MM::g_Keyword_Name, g_DeviceNameSECOMSampleXY, MM::String, true);
+		assert(DEVICE_OK == ret);
+	}
+	else
+	{
+		ret = CreateProperty(MM::g_Keyword_Description, "SECOM XY Stage wo Feedback", MM::String, true);
+		assert(DEVICE_OK == ret);
 
-	// Name
-	ret = CreateProperty(MM::g_Keyword_Name, g_DeviceNameSECOMSampleXY, MM::String, true);
-	assert(DEVICE_OK == ret);
+		// Name
+		ret = CreateProperty(MM::g_Keyword_Name, g_DeviceNameSECOMObjectiveXY, MM::String, true);
+		assert(DEVICE_OK == ret);
+	}
+
+	
 
 	CPropertyAction* pAct = new CPropertyAction(this, &CSECOMStageXY::OnFineVoltageX);
 	ret = CreateProperty("Fine Voltage X", "0", MM::Float, false, pAct);
