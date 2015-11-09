@@ -70,40 +70,45 @@ public:
 	  CPropertyAction* pAct = new CPropertyAction(this, &CSECOMStageHub::OnPort);
 	  CreateProperty(MM::g_Keyword_Port, "Undefined", MM::String, false, pAct, true);
 	*/
-	int OnPort(MM::PropertyBase* pPropt, MM::ActionType pAct);
+	//int OnPort(MM::PropertyBase* pPropt, MM::ActionType pAct);
 
 	// Custom interface for child devices
 	bool IsPortAvailable() { return portAvailable_; }
 
 	bool DoReset(char device);
-	bool GCSCommandWithAnswer(const std::string command, std::vector<std::string>& answer, int nExpectedLines = -1);
+	bool GCSCommand(const char* command);
+	bool qGCSCommand(const char* command, std::string& answer);
+
+	/*bool GCSCommandWithAnswer(const std::string command, std::vector<std::string>& answer, int nExpectedLines = -1);
 	bool GCSCommandWithAnswer(unsigned char singleByte, std::vector<std::string>& answer, int nExpectedLines = -1);
 	bool SendGCSCommand(const std::string command);
 	bool SendGCSCommand(unsigned char singlebyte);
-	bool ReadGCSAnswer(std::vector<std::string>& answer, int nExpectedLines = -1);
+	bool ReadGCSAnswer(std::vector<std::string>& answer, int nExpectedLines = -1);*/
 	int GetLastError() const { return lastError_; };
 
-	int LoadDLL(const std::string& dllName);
-	//int ConnectInterface(const std::string& interfaceType, const std::string& interfaceParameter);
-	void CloseAndUnload();
-
 private:
+	typedef int (WINAPI *FP_IsConnected) (int);
 	typedef int (WINAPI *FP_CloseConnection) (int);
 	typedef int (WINAPI *FP_EnumerateUSB) (char*, long, const char*);
 	typedef int (WINAPI *FP_ConnectUSB) (const char*);
 	typedef int (WINAPI *FP_GcsCommandset) (int, const char*);
 	typedef int (WINAPI *FP_GcsGetAnswer) (int, char*, int);
+	typedef int (WINAPI *FP_GcsGetAnswerSize) (int, int*);
 
+	FP_IsConnected IsConnected_;
 	FP_CloseConnection CloseConnection_;
 	FP_EnumerateUSB EnumerateUSB_;
 	FP_ConnectUSB ConnectUSB_;
 	FP_GcsCommandset GcsCommandset_;
 	FP_GcsGetAnswer GcsGetAnswer_;
+	FP_GcsGetAnswerSize GcsGetAnswerSize_;
 
+	int LoadDLL(const std::string& dllName);
 	void* LoadDLLFunc(const char* funcName);
+	void CloseAndUnload();
 	int ConnectUSB(const std::string& interfaceParameter);
 
-	std::string port_, dllName_, dllPrefix_, interfaceParameter_;
+	std::string controllerType_, dllName_, dllPrefix_, interfaceParameter_;
 	bool initialized_, portAvailable_, isSerialBusy_;
 	int lastError_, ID_;
 

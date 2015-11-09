@@ -80,9 +80,10 @@ MODULE_API void DeleteDevice(MM::Device* pDevice)
   This configuration can be abstracted by using the "Hub" arrangement in Micro-Manager.
 */
 CSECOMStageHub::CSECOMStageHub()
-	: interfaceParameter_("PI E-861 PiezoWalk(R) Controller SN 0112000802")
+	: controllerType_("E-861")
 	, dllName_("PI_GCS2_DLL.dll")
 	, initialized_(false)
+	, interfaceParameter_("PI E-861 PiezoWalk(R) Controller SN 0112000802")
 	, isSerialBusy_(false)
 {
 	portAvailable_ = false;
@@ -105,7 +106,8 @@ CSECOMStageHub::CSECOMStageHub()
 
 CSECOMStageHub::~CSECOMStageHub()
 {
-	Shutdown();
+	//Shutdown();
+	CloseAndUnload();
 }
 
 void CSECOMStageHub::GetName(char* name) const
@@ -134,7 +136,7 @@ MM::DeviceDetectionStatus CSECOMStageHub::DetectDevice(void)
 
 	//try
 	//{
-	//	std::string portLowerCase = port_;
+	//	std::string portLowerCase = controllerType_;
 
 	//	// Iterate the string character by character and convert to lowercase.
 	//	for (std::string::iterator its = portLowerCase.begin(); its != portLowerCase.end(); ++its)
@@ -148,15 +150,15 @@ MM::DeviceDetectionStatus CSECOMStageHub::DetectDevice(void)
 	//		result = MM::CanNotCommunicate;
 
 	//		// record the default answer time out
-	//		GetCoreCallback()->GetDeviceProperty(port_.c_str(), "AnswerTimeout", answerTO);
+	//		GetCoreCallback()->GetDeviceProperty(controllerType_.c_str(), "AnswerTimeout", answerTO);
 
-	//		GetCoreCallback()->SetDeviceProperty(port_.c_str(), MM::g_Keyword_Handshaking, "Off");
-	//		GetCoreCallback()->SetDeviceProperty(port_.c_str(), MM::g_Keyword_BaudRate, "115200");
-	//		GetCoreCallback()->SetDeviceProperty(port_.c_str(), MM::g_Keyword_StopBits, "1");
-	//		GetCoreCallback()->SetDeviceProperty(port_.c_str(), "AnswerTimeout", "500.0");
-	//		GetCoreCallback()->SetDeviceProperty(port_.c_str(), "DelayBetweenCharsMs", "0");
+	//		GetCoreCallback()->SetDeviceProperty(controllerType_.c_str(), MM::g_Keyword_Handshaking, "Off");
+	//		GetCoreCallback()->SetDeviceProperty(controllerType_.c_str(), MM::g_Keyword_BaudRate, "115200");
+	//		GetCoreCallback()->SetDeviceProperty(controllerType_.c_str(), MM::g_Keyword_StopBits, "1");
+	//		GetCoreCallback()->SetDeviceProperty(controllerType_.c_str(), "AnswerTimeout", "500.0");
+	//		GetCoreCallback()->SetDeviceProperty(controllerType_.c_str(), "DelayBetweenCharsMs", "0");
 
-	//		MM::Device* pS = GetCoreCallback()->GetDevice(this, port_.c_str());
+	//		MM::Device* pS = GetCoreCallback()->GetDevice(this, controllerType_.c_str());
 	//		pS->Initialize();
 
 	//		// to succeed must reach here....
@@ -164,7 +166,7 @@ MM::DeviceDetectionStatus CSECOMStageHub::DetectDevice(void)
 
 	//		pS->Shutdown();
 	//		// always restore the AnswerTimeout to the default
-	//		GetCoreCallback()->SetDeviceProperty(port_.c_str(), "AnswerTimeout", answerTO);
+	//		GetCoreCallback()->SetDeviceProperty(controllerType_.c_str(), "AnswerTimeout", answerTO);
 
 	//	}
 	//}
@@ -178,16 +180,28 @@ MM::DeviceDetectionStatus CSECOMStageHub::DetectDevice(void)
 	return MM::CanCommunicate;
 }
 
+/*
+  The Initialize() and Shudown() methods are critical to ensure that Device Adapter 
+  behaves as expected within Micro-manager environment. 
+  Rules for implementing these two methods are as follows:
+
+  * The Device Adapter instance does not communicate with hardware before Initialize() is called for the first time.
+  * Initialize() establishes the connection with the hardware and makes device ready to accept commands
+  * Once the device is successfully initialized, repeated calls to Initialize() (if they occur) should have no effect
+  * Shutdown() disconnects Device Adapter from the hardware and practically reverses the effect of Initialize()
+  * Once the device is successfully shut down, repeated calls to Shutdown() should not have any effect
+  * After Shutdown() is called device should never attempt to communicate with the hardware, except after Inititalize() is called again
+*/
 int CSECOMStageHub::Initialize()
 {
+	// If initialized, return immediately (rule 3).
 	if (initialized_)
 		return DEVICE_OK;
 
-	// Set the name of the device.
-	int ret = CreateProperty(MM::g_Keyword_Name, g_DeviceNameSECOMHub, MM::String, true);
+	// Try and load the dll.
+	int ret = LoadDLL(dllName_);
 
-	ret = LoadDLL(dllName_);
-
+	// If the dll cannot be loaded, inform the user and clean up.
 	if (ret != DEVICE_OK)
 	{
 		LogMessage(std::string("Cannot load dll ") + dllName_);
@@ -195,8 +209,10 @@ int CSECOMStageHub::Initialize()
 		return ret;
 	}
 
+	// Connect.
 	ret = ConnectUSB(interfaceParameter_);
 	
+	// In case of trouble, inform the user and clean up.
 	if (ret != DEVICE_OK)
 	{
 		LogMessage("Cannot connect");
@@ -204,32 +220,13 @@ int CSECOMStageHub::Initialize()
 		return ret;
 	}
 
+    std::string answer("");
+
+	ret = qGCSCommand("*IDN?", answer);
+
+	// We got here without errors o all is well.
 	initialized_ = true;
 
-	// We will query the device ID. Reserve space for it.
-	//std::vector<std::string> answer;
-
-	char answer[MM::MaxStrLength];
-
-	// Check that we have a controller by querying it's ID.
-	try {
-		//GCSCommandWithAnswer("*IDN?", answer);
-		GcsCommandset_(ID_, "*IDN?");
-		GcsGetAnswer_(ID_, answer, 1024);
-	}
-	catch (...)
-	{
-		LogMessage("Cannot Communicate with stages", false);
-	}
-
-	// TODO: Better check.
-	//if (answer[0] != "(")
-	//	return ret;
-
-	// turn off verbose serial debug messages
-	//GetCoreCallback()->SetDeviceProperty(port_.c_str(), "Verbose", "0");
-
-	initialized_ = true;
 	return DEVICE_OK;
 }
 
@@ -262,60 +259,64 @@ int CSECOMStageHub::DetectInstalledDevices()
 
 int CSECOMStageHub::Shutdown()
 {
+	if (!initialized_)
+		return DEVICE_OK;
+
+	CloseAndUnload();
 	initialized_ = false;
 	return DEVICE_OK;
 }
 
-bool CSECOMStageHub::SendGCSCommand(unsigned char singlebyte)
-{
-	int ret = 1;
-	try {
-		ret = WriteToComPort(port_.c_str(), &singlebyte, 1);
-	}
-	catch (...)
-	{
-		LogMessage("Serial Error", false);
-	}
-	if (ret != DEVICE_OK)
-	{
-		lastError_ = ret;
-		return false;
-	}
-	return true;
-}
-
-bool CSECOMStageHub::SendGCSCommand(const std::string command)
-{
-	int ret = 1;
-	try {
-		ret = SendSerialCommand(port_.c_str(), command.c_str(), "\n");
-	}
-	catch (...)
-	{
-		LogMessage("Serial Error", false);
-	}
-
-	if (ret != DEVICE_OK)
-	{
-		lastError_ = ret;
-		return false;
-	}
-	return true;
-}
-
-bool CSECOMStageHub::GCSCommandWithAnswer(const std::string command, std::vector<std::string>& answer, int nExpectedLines)
-{
-	if (!SendGCSCommand(command))
-		return false;
-	return ReadGCSAnswer(answer, nExpectedLines);
-}
-
-bool CSECOMStageHub::GCSCommandWithAnswer(unsigned char singlebyte, std::vector<std::string>& answer, int nExpectedLines)
-{
-	if (!SendGCSCommand(singlebyte))
-		return false;
-	return ReadGCSAnswer(answer, nExpectedLines);
-}
+//bool CSECOMStageHub::SendGCSCommand(unsigned char singlebyte)
+//{
+//	int ret = 1;
+//	try {
+//		ret = WriteToComPort(controllerType_.c_str(), &singlebyte, 1);
+//	}
+//	catch (...)
+//	{
+//		LogMessage("Serial Error", false);
+//	}
+//	if (ret != DEVICE_OK)
+//	{
+//		lastError_ = ret;
+//		return false;
+//	}
+//	return true;
+//}
+//
+//bool CSECOMStageHub::SendGCSCommand(const std::string command)
+//{
+//	int ret = 1;
+//	try {
+//		ret = SendSerialCommand(controllerType_.c_str(), command.c_str(), "\n");
+//	}
+//	catch (...)
+//	{
+//		LogMessage("Serial Error", false);
+//	}
+//
+//	if (ret != DEVICE_OK)
+//	{
+//		lastError_ = ret;
+//		return false;
+//	}
+//	return true;
+//}
+//
+//bool CSECOMStageHub::GCSCommandWithAnswer(const std::string command, std::vector<std::string>& answer, int nExpectedLines)
+//{
+//	if (!SendGCSCommand(command))
+//		return false;
+//	return ReadGCSAnswer(answer, nExpectedLines);
+//}
+//
+//bool CSECOMStageHub::GCSCommandWithAnswer(unsigned char singlebyte, std::vector<std::string>& answer, int nExpectedLines)
+//{
+//	if (!SendGCSCommand(singlebyte))
+//		return false;
+//	return ReadGCSAnswer(answer, nExpectedLines);
+//}
 
 bool CSECOMStageHub::DoReset(char device)
 {
@@ -325,7 +326,7 @@ bool CSECOMStageHub::DoReset(char device)
 	command << device << " ERR?";
 	do
 	{
-		GCSCommandWithAnswer(command.str(), answer, 1);
+		//GCSCommandWithAnswer(command.str(), answer, 1);
 		count++;
 	} while (count < 10 && answer[0][0] != '0');
 	if (count < 10)
@@ -339,37 +340,98 @@ bool CSECOMStageHub::DoReset(char device)
 
 }
 
-bool CSECOMStageHub::ReadGCSAnswer(std::vector<std::string>& answer, int nExpectedLines)
+bool CSECOMStageHub::GCSCommand(const char* command)
 {
-	answer.clear();
-	std::string line;
-	int ret = 1;
-	do
+	std::ostringstream msg;
+
+	try
 	{
-		// block/wait for acknowledge, or until we time out;
-		try {
-			ret = GetSerialAnswer(port_.c_str(), "\n", line);
-		}
-		catch (...)
-		{
-			LogMessage("Serial Error", false);
-		}
-		if (ret != DEVICE_OK)
-		{
-			lastError_ = ret;
-			return false;
-		}
-		answer.push_back(line);
-	} while (!line.empty() && line[line.length() - 1] == ' ');
-	if ((unsigned)nExpectedLines >= 0 && answer.size() != (unsigned)nExpectedLines)
+		int ret = GcsCommandset_(ID_, command);
+		return ret;
+	}
+	catch (...)
+	{
+		msg.str("");
+		msg.clear();
+		msg << "Could not send command: " << command;
+		LogMessage(msg.str());
 		return false;
-	return true;
+	}
 }
+
+bool CSECOMStageHub::qGCSCommand(const char* command, std::string& answer)
+{
+	std::ostringstream out;
+	out.str("");
+	out.clear();
+
+	int ret = GCSCommand(command);
+	int answerSz = 0;
+	char reply[MM::MaxStrLength];
+
+	std::ostringstream msg;
+
+	try
+	{
+		while (answerSz <= 0)
+		{
+			ret = GcsGetAnswerSize_(ID_, &answerSz);
+
+			if (answerSz > 0)
+			{
+				ret = GcsGetAnswer_(ID_, reply, answerSz);
+				out << std::string(reply);
+			}
+		}
+
+		answer = out.str();
+
+		return ret;
+	}
+	catch (...)
+	{
+		LogMessage("Could not receive answer for command!");
+		return false;
+	}
+
+	
+}
+
+//bool CSECOMStageHub::ReadGCSAnswer(std::vector<std::string>& answer, int nExpectedLines)
+//{
+//	answer.clear();
+//	std::string line;
+//	int ret = 1;
+//	do
+//	{
+//		// block/wait for acknowledge, or until we time out;
+//		try {
+//			ret = GetSerialAnswer(controllerType_.c_str(), "\n", line);
+//		}
+//		catch (...)
+//		{
+//			LogMessage("Serial Error", false);
+//		}
+//		if (ret != DEVICE_OK)
+//		{
+//			lastError_ = ret;
+//			return false;
+//		}
+//		answer.push_back(line);
+//	} while (!line.empty() && line[line.length() - 1] == ' ');
+//	if ((unsigned)nExpectedLines >= 0 && answer.size() != (unsigned)nExpectedLines)
+//		return false;
+//	return true;
+//}
 
 int CSECOMStageHub::LoadDLL(const std::string & dllName)
 {
+	/* All exported functions in PI libraries have a prefix which is often dll specific.
+	   For PI_GCS2_DLL.dll this is "PI_".
+	*/
 	dllPrefix_ = "PI_";
-
+	
+	// Load the dll.
 #ifdef WIN32
 	module_ = LoadLibrary(dllName.c_str());
 #else
@@ -382,10 +444,16 @@ int CSECOMStageHub::LoadDLL(const std::string & dllName)
 		return DEVICE_ERR;
 	}
 
+	// Assign the Function Pointers with the correct addresses.
+	IsConnected_ = (FP_IsConnected)LoadDLLFunc("IsConnected");
 	CloseConnection_ = (FP_CloseConnection)LoadDLLFunc("CloseConnection");
 	EnumerateUSB_ = (FP_EnumerateUSB)LoadDLLFunc("EnumerateUSB");
 	ConnectUSB_ = (FP_ConnectUSB)LoadDLLFunc("ConnectUSB");
 	GcsCommandset_ = (FP_GcsCommandset)LoadDLLFunc("GcsCommandset");
+	GcsGetAnswerSize_ = (FP_GcsGetAnswerSize)LoadDLLFunc("GcsGetAnswerSize");
+	GcsGetAnswer_ = (FP_GcsGetAnswer)LoadDLLFunc("GcsGetAnswer");
+
+	// Return OK.
 	return DEVICE_OK;
 }
 
@@ -399,6 +467,7 @@ void CSECOMStageHub::CloseAndUnload()
 
 	ID_ = -1;
 
+	// Unload the dll.
 #ifdef WIN32
 	FreeLibrary(module_);
 	module_ = NULL;
@@ -420,8 +489,12 @@ int CSECOMStageHub::ConnectUSB(const std::string & interfaceParameter)
 	if (ConnectUSB_ == NULL || EnumerateUSB_ == NULL)
 		return DEVICE_NOT_SUPPORTED;
 
+	// Allocate sufficient space for all discovered device strings.
 	char szDevices[128 * 80 + 1];
-	int nrDevices = EnumerateUSB_(szDevices, 128 * 80, NULL);
+
+	// We enumerate all devices that feature the desired controller type as a substring in their description.
+	int nrDevices = EnumerateUSB_(szDevices, 128 * 80, controllerType_.c_str());
+	
 	if (nrDevices < 0)
 		//return TranslateError(nrDevices);
 		return -1;
@@ -439,328 +512,31 @@ int CSECOMStageHub::ConnectUSB(const std::string & interfaceParameter)
 	else
 	{
 		//deviceName = FindDeviceNameInUSBList(szDevices, interfaceParameter);
+		deviceName =  interfaceParameter;
 	}
 	if (deviceName.empty())
 		return DEVICE_NOT_CONNECTED;
 
 	ID_ = ConnectUSB_(deviceName.c_str());
+
 	if (ID_<0)
 		return DEVICE_NOT_CONNECTED;
 
 	return DEVICE_OK;
 }
 
-int CSECOMStageHub::OnPort(MM::PropertyBase* pProp, MM::ActionType pAct)
-{
-	if (pAct == MM::BeforeGet)
-	{
-		pProp->Set(port_.c_str());
-	}
-	else if (pAct == MM::AfterSet)
-	{
-		pProp->Get(port_);
-		portAvailable_ = true;
-	}
-	return DEVICE_OK;
-}
-
-//CSECOMStageLR::CSECOMStageLR() :initialized_(false)
+//int CSECOMStageHub::OnPort(MM::PropertyBase* pProp, MM::ActionType pAct)
 //{
-//	InitializeDefaultErrorMessages();
-//
-//	// parent ID display
-//	CreateHubIDProperty();
-//
-//}
-//
-//CSECOMStageLR::~CSECOMStageLR()
-//{
-//	Shutdown();
-//}
-//
-//void CSECOMStageLR::GetName(char* name) const
-//{
-//	CDeviceUtils::CopyLimitedString(name, g_DeviceNameSECOMObjectiveXY);
-//}
-//
-//int CSECOMStageLR::Initialize()
-//{
-//	CSECOMStageHub* hub = static_cast<CSECOMStageHub*>(GetParentHub());
-//	//  if (!hub || !hub->IsPortAvailable()) {
-//	//     return ERR_NO_PORT_SET;
-//	//  }
-//	char hubLabel[MM::MaxStrLength];
-//	hub->GetLabel(hubLabel);
-//	SetParentID(hubLabel); // for backward comp.
-//
-//
-//	int ret = CreateProperty(MM::g_Keyword_Description, "SECOM LR Objective Stage", MM::String, true);
-//	assert(DEVICE_OK == ret);
-//
-//	// Name
-//	ret = CreateProperty(MM::g_Keyword_Name, g_DeviceNameSECOMObjectiveXY, MM::String, true);
-//	assert(DEVICE_OK == ret);
-//
-//	CPropertyAction* pAct = new CPropertyAction(this, &CSECOMStageLR::OnFineVoltageX);
-//	ret = CreateProperty("Fine Voltage L", "0", MM::Float, false, pAct);
-//	assert(DEVICE_OK == ret);
-//	pAct = new CPropertyAction(this, &CSECOMStageLR::OnFineVoltageY);
-//	ret = CreateProperty("Fine Voltage R", "0", MM::Float, false, pAct);
-//	assert(DEVICE_OK == ret);
-//	pAct = new CPropertyAction(this, &CSECOMStageLR::OnReset);
-//	ret = CreateProperty("Reset?", "0", MM::Integer, false, pAct);
-//	assert(DEVICE_OK == ret);
-//
-//	//pAct = new CPropertyAction(this, &CSECOMStageLR::OnStepVoltage);
-//	ret = CreateProperty("Step Voltage RP", "30.0", MM::Float, false);
-//	assert(DEVICE_OK == ret);
-//	ret = CreateProperty("Step Voltage RN", "30.0", MM::Float, false);
-//	assert(DEVICE_OK == ret);
-//	ret = CreateProperty("Step Voltage LP", "30.0", MM::Float, false);
-//	assert(DEVICE_OK == ret);
-//	ret = CreateProperty("Step Voltage LN", "30.0", MM::Float, false);
-//	assert(DEVICE_OK == ret);
-//
-//	initialized_ = true;
-//
-//	return DEVICE_OK;
-//}
-//
-//int CSECOMStageLR::Shutdown()
-//{
-//	initialized_ = false;
-//	return DEVICE_OK;
-//}
-//
-//bool CSECOMStageLR::Busy()
-//{
-//	return false;
-//}
-//
-//int CSECOMStageLR::OnFineVoltageX(MM::PropertyBase* pProp, MM::ActionType pAct)
-//{
-//	if (pAct == MM::BeforeGet) {
-//		// Nothing to do, let the caller use cached property
-//	}
-//	else if (pAct == MM::AfterSet) {
-//		std::ostringstream command;
-//		CSECOMStageHub* hub = static_cast<CSECOMStageHub*>(GetParentHub());
-//		double val;
-//		pProp->Get(val);
-//		// if (!hub || !hub->IsPortAvailable())
-//		//    return ERR_NO_PORT_SET;
-//		if (isFirstMoveL_)
-//		{
-//			wasLastMoveStepL_ = true;
-//			isFirstMoveL_ = false;
-//		}
-//		if (wasLastMoveStepL_)
-//		{
-//			command.str("");
-//			command.clear();
-//			command << "2 RNP 1 0";
-//			hub->SendGCSCommand(command.str());
-//		}
-//		command.str("");
-//		command.clear();
-//		command << "2 OAD 1 " << val;
-//		hub->SendGCSCommand(command.str());
-//		wasLastMoveStepL_ = false;
-//	}
-//
-//	return DEVICE_OK;
-//}
-//
-//int CSECOMStageLR::OnFineVoltageY(MM::PropertyBase* pProp, MM::ActionType pAct)
-//{
-//	if (pAct == MM::BeforeGet) {
-//		// Nothing to do, let the caller use cached property
-//	}
-//	else if (pAct == MM::AfterSet) {
-//		std::ostringstream command;
-//		CSECOMStageHub* hub = static_cast<CSECOMStageHub*>(GetParentHub());
-//		double val;
-//		pProp->Get(val);
-//		// if (!hub || !hub->IsPortAvailable())
-//		//    return ERR_NO_PORT_SET;
-//		if (isFirstMoveR_)
-//		{
-//			wasLastMoveStepR_ = true;
-//			isFirstMoveR_ = false;
-//		}
-//		if (wasLastMoveStepR_)
-//		{
-//			command.str("");
-//			command.clear();
-//			command << "1 RNP 1 0";
-//			hub->SendGCSCommand(command.str());
-//		}
-//		command.str("");
-//		command.clear();
-//		command << "1 OAD 1 " << val;
-//		hub->SendGCSCommand(command.str());
-//		wasLastMoveStepR_ = false;
-//	}
-//
-//	return DEVICE_OK;
-//}
-//
-//int CSECOMStageLR::OnReset(MM::PropertyBase* pProp, MM::ActionType pAct)
-//{
-//	CSECOMStageHub* hub = static_cast<CSECOMStageHub*>(GetParentHub());
-//	if (pAct == MM::AfterSet)
+//	if (pAct == MM::BeforeGet)
 //	{
-//		pProp->Set((long)(0));
-//		hub->DoReset(1);
-//		hub->DoReset(2);
+//		pProp->Set(controllerType_.c_str());
 //	}
-//	return DEVICE_OK;
-//}
-///*
-//int CSECOMStageLR::OnStepVoltage(MM::PropertyBase* pProp, MM::ActionType pAct)
-//{
-//   if (pAct == MM::BeforeGet) {
-//	  // Nothing to do, let the caller use cached property
-//   } else if (pAct ==MM::AfterSet) {
-//	  std::ostringstream command;
-//		CSECOMStageHub* hub = static_cast<CSECOMStageHub*>(GetParentHub());
-//		double val;
-//		pProp->Get(val);
-//  // if (!hub || !hub->IsPortAvailable())
-//  //    return ERR_NO_PORT_SET;
-//	   command.str("");
-//	   command.clear();
-//	   command << "1 SSA 1 " << val;
-//	   hub->SendGCSCommand(command.str());
-//	   command.str("");
-//	   command.clear();
-//	   command << "2 SSA 1 " << val;
-//	   hub->SendGCSCommand(command.str());
-//   }
-//
-//   return DEVICE_OK;
-//}
-//*/
-//int CSECOMStageLR::SetPositionSteps(long x, long y)
-//{
-//	std::ostringstream command;
-//	CSECOMStageHub* hub = static_cast<CSECOMStageHub*>(GetParentHub());
-//	// if (!hub || !hub->IsPortAvailable())
-//	//    return ERR_NO_PORT_SET;
-//
-//	double val;
-//	if (x != 0)
+//	else if (pAct == MM::AfterSet)
 //	{
-//		if (x > 0)
-//		{
-//			GetProperty("Step Voltage LP", val);
-//			command.str("");
-//			command.clear();
-//			command << "2 SSA 1 " << val;
-//			hub->SendGCSCommand(command.str());
-//		}
-//		else if (x < 0)
-//		{
-//			GetProperty("Step Voltage LN", val);
-//			command.str("");
-//			command.clear();
-//			command << "2 SSA 1 " << val;
-//			hub->SendGCSCommand(command.str());
-//		}
-//		//	   command.str("");
-//		//	   command.clear();
-//		//	   command << "2 RNP 1 0";  
-//		//	   hub->SendGCSCommand(command.str());
-//		command.str("");
-//		command.clear();
-//		command << "2 OSM 1 " << x;
-//		hub->SendGCSCommand(command.str());
+//		pProp->Get(controllerType_);
+//		portAvailable_ = true;
 //	}
-//	if (y != 0)
-//	{
-//
-//		if (y > 0)
-//		{
-//			GetProperty("Step Voltage RP", val);
-//			command.str("");
-//			command.clear();
-//			command << "1 SSA 1 " << val;
-//			hub->SendGCSCommand(command.str());
-//		}
-//		else if (y < 0)
-//		{
-//			GetProperty("Step Voltage RN", val);
-//			command.str("");
-//			command.clear();
-//			command << "1 SSA 1 " << val;
-//			hub->SendGCSCommand(command.str());
-//		}
-//		//	   command.str("");
-//		//	   command.clear();
-//		//	   command << "1 RNP 1 0";  
-//		//	   hub->SendGCSCommand(command.str());
-//		command.str("");
-//		command.clear();
-//		command << "1 OSM 1 " << y;
-//		hub->SendGCSCommand(command.str());
-//	}
-//
 //	return DEVICE_OK;
-//}
-//
-//int CSECOMStageLR::GetPositionSteps(long& x, long& y)
-//{
-//	x = 0;
-//	y = 0;
-//
-//	return DEVICE_OK;
-//}
-//
-//double CSECOMStageLR::GetStepSize()
-//{
-//	return 1.0;
-//}
-//
-//int CSECOMStageLR::Home()
-//{
-//	return DEVICE_UNSUPPORTED_COMMAND;
-//}
-//
-//int CSECOMStageLR::SetRelativePositionUm(double dx, double dy)
-//{
-//	SetPositionSteps(long(dx), long(dy));
-//	return DEVICE_OK;
-//}
-//
-//int CSECOMStageLR::Stop()
-//{
-//	return DEVICE_UNSUPPORTED_COMMAND;
-//}
-//
-//int CSECOMStageLR::SetOrigin()
-//{
-//
-//	return DEVICE_UNSUPPORTED_COMMAND;
-//}
-//
-//int CSECOMStageLR::GetLimitsUm(double& xMin, double& xMax, double& yMin, double& yMax)
-//{
-//	return DEVICE_UNSUPPORTED_COMMAND;
-//}
-//
-//int CSECOMStageLR::GetStepLimits(long& xMin, long& xMax, long& yMin, long& yMax)
-//{
-//	return DEVICE_UNSUPPORTED_COMMAND;
-//}
-//
-//double CSECOMStageLR::GetStepSizeXUm()
-//{
-//	return 1.0;
-//}
-//
-//double CSECOMStageLR::GetStepSizeYUm()
-//{
-//	return 1.0;
 //}
 
 CSECOMStageXY::CSECOMStageXY(bool feedback, char addressX, char addressY)
@@ -893,14 +669,14 @@ int CSECOMStageXY::OnFineVoltageX(MM::PropertyBase* pProp, MM::ActionType pAct)
 			//command << "5 RNP 1 0";
 			command << addressX_;
 			command << " RNP 1 0";
-			hub->SendGCSCommand(command.str());
+			hub->GCSCommand(command.str().c_str());
 		}
 		command.str("");
 		command.clear();
 		//command << "5 OAD 1 " << val;
 		command << addressX_;
 		command << " OAD 1 " << val;
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 		wasLastMoveStepL_ = false;
 	}
 
@@ -931,14 +707,14 @@ int CSECOMStageXY::OnFineVoltageY(MM::PropertyBase* pProp, MM::ActionType pAct)
 			//command << "4 RNP 1 0";
 			command << addressY_;
 			command << " RNP 1 0";
-			hub->SendGCSCommand(command.str());
+			hub->GCSCommand(command.str().c_str());
 		}
 		command.str("");
 		command.clear();
 		//command << "4 OAD 1 " << val;
 		command << addressY_;
 		command << " OAD 1 " << val;
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 		wasLastMoveStepR_ = false;
 	}
 
@@ -992,7 +768,7 @@ int CSECOMStageXY::SetPositionSteps(long x, long y)
 			//command << "2 SSA 1 " << val;
 			command << addressX_;
 			command << " SSA 1 " << val;
-			hub->SendGCSCommand(command.str());
+			hub->GCSCommand(command.str().c_str());
 		}
 		else if (x < 0)
 		{
@@ -1002,7 +778,7 @@ int CSECOMStageXY::SetPositionSteps(long x, long y)
 			//command << "2 SSA 1 " << val;
 			command << addressX_;
 			command << " SSA 1 " << val;
-			hub->SendGCSCommand(command.str());
+			hub->GCSCommand(command.str().c_str());
 		}
 		//	   command.str("");
 		//	   command.clear();
@@ -1013,7 +789,7 @@ int CSECOMStageXY::SetPositionSteps(long x, long y)
 		//command << "2 OSM 1 " << x;
 		command << addressX_;
 		command << " OSM 1 " << x;
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 	}
 	if (y != 0)
 	{
@@ -1026,7 +802,7 @@ int CSECOMStageXY::SetPositionSteps(long x, long y)
 			//command << "1 SSA 1 " << val;
 			command << addressY_;
 			command << " SSA 1 " << val;
-			hub->SendGCSCommand(command.str());
+			hub->GCSCommand(command.str().c_str());
 		}
 		else if (y < 0)
 		{
@@ -1036,7 +812,7 @@ int CSECOMStageXY::SetPositionSteps(long x, long y)
 			//command << "1 SSA 1 " << val;
 			command << addressY_;
 			command << " SSA 1 " << val;
-			hub->SendGCSCommand(command.str());
+			hub->GCSCommand(command.str().c_str());
 		}
 		//	   command.str("");
 		//	   command.clear();
@@ -1047,7 +823,7 @@ int CSECOMStageXY::SetPositionSteps(long x, long y)
 		//command << "1 OSM 1 " << y;
 		command << addressY_;
 		command << " OSM 1 " << y;
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 	}
 
 	return DEVICE_OK;
@@ -1075,27 +851,27 @@ int CSECOMStageXY::Home()
 		command.str("");
 		command.clear();
 		command << addressX_ << " SVO 1 1";
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 		command.str("");
 		command.clear();
 		command << addressY_ << " SVO 1 1";
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 		command.str("");
 		command.clear();
 		command << addressX_ << " FRF 1";
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 		command.str("");
 		command.clear();
 		command << addressY_ << " FRF 1";
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 		//command << "4 POS 1 " << xOrigin_ / 1000;
 		command << addressX_ << " POS 1 " << xOrigin_ / 1000;
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 		command.str("");
 		command.clear();
 		//command << "5 POS 1 " << yOrigin_ / 1000;
 		command << addressY_ << " POS 1 " << yOrigin_ / 1000;
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 		return DEVICE_OK;
 	}
 	else
@@ -1133,11 +909,11 @@ int CSECOMStageXY::SetRelativePositionUm(double dx, double dy)
 		command.str("");
 		command.clear();
 		command << addressX_ << " MVR 1 " << dx;
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 		command.str("");
 		command.clear();
 		command << addressY_ << " MVR 1 " << dy;
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 
 		return DEVICE_OK;
 	}
@@ -1159,11 +935,11 @@ int CSECOMStageXY::SetPositionUm(double dx, double dy)
 		command.str("");
 		command.clear();
 		command << addressX_ << " MOV 1 " << dx;
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 		command.str("");
 		command.clear();
 		command << addressY_ << " MOV 1 " << dy;
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 
 		return DEVICE_OK;
 	}
@@ -1178,18 +954,18 @@ int CSECOMStageXY::GetPositionUm(double &dx, double &dy)
 	if (supportsPositionFeedback_)
 	{
 		CSECOMStageHub* hub = static_cast<CSECOMStageHub*>(GetParentHub());
-		std::vector<std::string> answer;
+		std::string answer("");
 
 		std::ostringstream command;
 		command.str("");
 		command.clear();
 		command << addressX_ << " POS? 1";
-		hub->GCSCommandWithAnswer(command.str(), answer, 1);
-		int length = answer[0].length();
+		hub->qGCSCommand(command.str().c_str(), answer);
+		int length = answer.length();
 		if (length > 6)
 		{
 			try {
-				dx = (stod(answer[0].substr(6, length - 1))) * 1000;
+				dx = (stod(answer.substr(6, length - 1))) * 1000;
 			}
 			catch (...)
 			{
@@ -1204,12 +980,12 @@ int CSECOMStageXY::GetPositionUm(double &dx, double &dy)
 		command.str("");
 		command.clear();
 		command << addressY_ << " POS? 1";
-		hub->GCSCommandWithAnswer(command.str(), answer, 1);
-		length = answer[0].length();
+		hub->qGCSCommand(command.str().c_str(), answer);
+		length = answer.length();
 		if (length > 6)
 		{
 			try {
-				dy = (stod(answer[0].substr(6, length - 1))) * 1000;
+				dy = (stod(answer.substr(6, length - 1))) * 1000;
 			}
 			catch (...)
 			{
@@ -1307,12 +1083,12 @@ int CSECOMStageZ::OnFineVoltage(MM::PropertyBase* pProp, MM::ActionType pAct)
 			command.str("");
 			command.clear();
 			command << "3 RNP 1 0";
-			hub->SendGCSCommand(command.str());
+			hub->GCSCommand(command.str().c_str());
 		}
 		command.str("");
 		command.clear();
 		command << "3 OAD 1 " << val;
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 		_wasLastMoveStep = false;
 	}
 
@@ -1406,7 +1182,7 @@ int CSECOMStageZ::SetPositionSteps(long steps)
 		command.str("");
 		command.clear();
 		command << "3 RNP 1 0";
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 	}
 	if (steps > 0)
 	{
@@ -1414,7 +1190,7 @@ int CSECOMStageZ::SetPositionSteps(long steps)
 		command.str("");
 		command.clear();
 		command << "3 SSA 1 " << stepvoltage;
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 	}
 	else if (steps < 0)
 	{
@@ -1422,12 +1198,12 @@ int CSECOMStageZ::SetPositionSteps(long steps)
 		command.str("");
 		command.clear();
 		command << "3 SSA 1 " << stepvoltage;
-		hub->SendGCSCommand(command.str());
+		hub->GCSCommand(command.str().c_str());
 	}
 	command.str("");
 	command.clear();
 	command << "3 OSM 1 " << steps;
-	hub->SendGCSCommand(command.str());
+	hub->GCSCommand(command.str().c_str());
 	_wasLastMoveStep = true;
 	return DEVICE_OK;
 }
@@ -1440,7 +1216,7 @@ int CSECOMStageZ::SetPositionUm(double pos)
 	command.str("");
 	command.clear();
 	command << "3 MOV 1 " << pos;
-	hub->SendGCSCommand(command.str());
+	hub->GCSCommand(command.str().c_str());
 	return DEVICE_OK;
 }
 
@@ -1452,20 +1228,20 @@ int CSECOMStageZ::SetRelativePositionUm(double &pos)
 	command.str("");
 	command.clear();
 	command << "3 MVR 1 " << pos;
-	hub->SendGCSCommand(command.str());
+	hub->GCSCommand(command.str().c_str());
 	return DEVICE_OK;
 }
 
 int CSECOMStageZ::GetPositionUm(double &pos)
 {
 	CSECOMStageHub* hub = static_cast<CSECOMStageHub*>(GetParentHub());
-	std::vector<std::string> answer;
-	hub->GCSCommandWithAnswer("3 POS? 1", answer, 1);
-	int length = answer[0].length();
+	std::string answer;
+	hub->qGCSCommand("3 POS? 1", answer);
+	int length = answer.length();
 	if (length > 6)
 	{
 		try {
-			pos = (stod(answer[0].substr(6, length - 1))) * 1000;
+			pos = (stod(answer.substr(6, length - 1))) * 1000;
 		}
 		catch (...)
 		{
@@ -1488,8 +1264,8 @@ int CSECOMStageZ::OnHome(MM::PropertyBase* pProp, MM::ActionType pAct)
 		if (state == "true")
 		{
 			CSECOMStageHub* hub = static_cast<CSECOMStageHub*>(GetParentHub());
-			hub->SendGCSCommand("3 SVO 1 1");
-			hub->SendGCSCommand("3 GOH 1");
+			hub->GCSCommand("3 SVO 1 1");
+			hub->GCSCommand("3 GOH 1");
 			pProp->Set("false");
 		}
 	}
@@ -1505,7 +1281,7 @@ int CSECOMStageZ::OnOrigin(MM::PropertyBase* pProp, MM::ActionType pAct)
 		if (state == "true")
 		{
 			CSECOMStageHub* hub = static_cast<CSECOMStageHub*>(GetParentHub());
-			hub->SendGCSCommand("3 POS 1 0.0");
+			hub->GCSCommand("3 POS 1 0.0");
 			pProp->Set("false");
 		}
 	}
