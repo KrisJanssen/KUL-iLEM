@@ -27,8 +27,8 @@ import javax.swing.WindowConstants;
 
 public class ILEMControl implements MMPlugin {
 
-    public static String menuName = "FluoSEM Control";
-    public static String tooltipDescription = "FluoSEM Control.";
+    public static String menuName = "iLEM Control";
+    public static String tooltipDescription = "iLEM Control.";
     private CMMCore core_;
     private CMMCore mmc;
     private ScriptInterface gui_;

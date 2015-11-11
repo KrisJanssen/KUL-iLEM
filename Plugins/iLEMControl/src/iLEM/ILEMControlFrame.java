@@ -6,25 +6,22 @@
 package iLEM;
 
 import bsh.EvalError;
+import bsh.Interpreter;
+import java.awt.Color;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.io.FileReader;
+import java.io.IOException;
 import java.text.NumberFormat;
 import java.util.prefs.Preferences;
 import javax.swing.Timer;
 import mmcorej.CMMCore;
-import mmcorej.DeviceType;
 import mmcorej.StrVector;
 import org.micromanager.api.ScriptInterface;
-import bsh.Interpreter;
-import java.awt.Color;
-import java.io.IOException;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import java.io.FileReader;
 
 /**
  *
- * @author Frank
+ * @author Kris Janssen. Based on early code by Thomas Franklin.
  */
 public class ILEMControlFrame extends javax.swing.JFrame {
 
@@ -87,16 +84,16 @@ public class ILEMControlFrame extends javax.swing.JFrame {
     private static final String SMALLMOVEMENTZ = "SMALLMOVEMENTZ";
     private static final String MEDIUMMOVEMENTZ = "MEDIUMMOVEMENTZ";
 
-    private static String XYStageLabel = "FluoSEM-Stage-XY";
-    private static String ZStageLabel = "FluoSEM-Stage-Z";
-    private static String LRStageLabel = "FluoSEM-Stage-LR";
+    private static String SampleXYLabel = "SECOM-Sample-XY";
+    private static String ObjectiveZLabel = "SECOM-Objective-Z";
+    private static String ObjectiveXYLabel = "SECOM-Objective-XY";
 
     //Declare timers for polling/timeouts
     private static Timer positionTimer;
     private static Timer laserOnTimer;
     private static Timer SEMTimer;
 
-    private double Xpos, Ypos;
+    private double Xpos, Ypos, Zpos;
 
     //Set state of system to nothing loaded
     private boolean isCameraLoaded, isXYStageLoaded, isLRStageLoaded, isZStageLoaded, isLaserLoaded, isSEMLoaded = false;
@@ -442,24 +439,26 @@ public class ILEMControlFrame extends javax.swing.JFrame {
             XYSmallDown.setEnabled(enabled);
             XYMedDown.setEnabled(enabled);
             XYBigDown.setEnabled(enabled);
-            ActionListener taskPerformer2;
-            taskPerformer2 = new ActionListener() {
+            ActionListener uiUpdateListener;
+            uiUpdateListener = new ActionListener() {
                 public void actionPerformed(ActionEvent d) {
                     // 1 Sekunde abziehen
                     try {
 
-                        Xpos = core_.getXPosition(XYStageLabel);
-                        Ypos = core_.getYPosition(XYStageLabel);
+                        Xpos = core_.getXPosition(SampleXYLabel);
+                        Ypos = core_.getYPosition(SampleXYLabel);
+                        Zpos = core_.getPosition(ObjectiveZLabel);
 
                     } catch (Exception e) {
                         gui_.logError(e);
                     }
-                    XPositionLabel.setText(String.valueOf(Xpos));
-                    YPositionLabel.setText(String.valueOf(Ypos));
+                    XPositionLabel.setText(String.format("%.3f", Xpos));
+                    YPositionLabel.setText(String.format("%.3f", Ypos));
+                    ZPositionLabel.setText(String.format("%.3f", Zpos));
                 }
             };
 
-            positionTimer = new Timer(500, taskPerformer2);
+            positionTimer = new Timer(500, uiUpdateListener);
             positionTimer.start();
 
             if ((isXYStageLoaded == true) || (isZStageLoaded == true)) {
@@ -557,21 +556,21 @@ public class ILEMControlFrame extends javax.swing.JFrame {
     private void ResetStages() {
         if (isXYStageLoaded) {
             try {
-                core_.setProperty(XYStageLabel, "Reset?", 1);
+                core_.setProperty(SampleXYLabel, "Reset?", 1);
             } catch (Exception e) {
                 gui_.logError(e);
             }
         }
         if (isLRStageLoaded) {
             try {
-                core_.setProperty(LRStageLabel, "Reset?", 1);
+                core_.setProperty(ObjectiveXYLabel, "Reset?", 1);
             } catch (Exception e) {
                 gui_.logError(e);
             }
         }
         if (isZStageLoaded) {
             try {
-                core_.setProperty(ZStageLabel, "Reset?", 1);
+                core_.setProperty(ObjectiveZLabel, "Reset?", 1);
             } catch (Exception e) {
                 gui_.logError(e);
             }
@@ -612,15 +611,15 @@ public class ILEMControlFrame extends javax.swing.JFrame {
                 isCameraLoaded = true;
                 CameraEnable(true);
             }
-            if (loadedDevices.get(i).equals("FluoSEM-Stage-XY")) {
+            if (loadedDevices.get(i).equals(SampleXYLabel)) {
                 isXYStageLoaded = true;
                 XYStageEnable(true);
             }
-            if (loadedDevices.get(i).equals("FluoSEM-Stage-LR")) {
+            if (loadedDevices.get(i).equals(ObjectiveXYLabel)) {
                 isLRStageLoaded = true;
                 LRStageEnable(true);
             }
-            if (loadedDevices.get(i).equals("FluoSEM-Stage-Z")) {
+            if (loadedDevices.get(i).equals(ObjectiveZLabel)) {
                 isZStageLoaded = true;
                 ZStageEnable(true);
             }
@@ -635,7 +634,7 @@ public class ILEMControlFrame extends javax.swing.JFrame {
         }
 
         try {
-            core_.setXYStageDevice(XYStageLabel);
+            core_.setXYStageDevice(SampleXYLabel);
         } catch (Exception e) {
             gui_.logError(e);
         }
@@ -695,6 +694,7 @@ public class ILEMControlFrame extends javax.swing.JFrame {
         ZBigUp = new javax.swing.JButton();
         ZSmallDown = new javax.swing.JButton();
         ZSmallUp = new javax.swing.JButton();
+        ZPositionLabel = new javax.swing.JLabel();
         jLabel3 = new javax.swing.JLabel();
         jLabel16 = new javax.swing.JLabel();
         ZFineSlider = new javax.swing.JSlider();
@@ -1065,10 +1065,10 @@ public class ILEMControlFrame extends javax.swing.JFrame {
 
         jLabel92.setText("X:");
 
-        XPositionSet.setText("?");
+        XPositionSet.setText("0.0");
         XPositionSet.setMinimumSize(new java.awt.Dimension(59, 20));
 
-        YPositionSet.setText("?");
+        YPositionSet.setText("0.0");
         YPositionSet.setMinimumSize(new java.awt.Dimension(59, 20));
 
         jLabel93.setText("Y:");
@@ -1202,17 +1202,22 @@ public class ILEMControlFrame extends javax.swing.JFrame {
             }
         });
 
+        ZPositionLabel.setText("?");
+
         javax.swing.GroupLayout jPanel6Layout = new javax.swing.GroupLayout(jPanel6);
         jPanel6.setLayout(jPanel6Layout);
         jPanel6Layout.setHorizontalGroup(
             jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
             .addGroup(jPanel6Layout.createSequentialGroup()
                 .addContainerGap()
-                .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
-                    .addComponent(ZSmallUp, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 60, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(ZSmallDown, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 60, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(ZBigDown, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 60, javax.swing.GroupLayout.PREFERRED_SIZE)
-                    .addComponent(ZBigUp, javax.swing.GroupLayout.Alignment.TRAILING, javax.swing.GroupLayout.PREFERRED_SIZE, 60, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGroup(jPanel6Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING)
+                    .addComponent(ZSmallUp, javax.swing.GroupLayout.PREFERRED_SIZE, 60, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(ZSmallDown, javax.swing.GroupLayout.PREFERRED_SIZE, 60, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(ZBigDown, javax.swing.GroupLayout.PREFERRED_SIZE, 60, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addComponent(ZBigUp, javax.swing.GroupLayout.PREFERRED_SIZE, 60, javax.swing.GroupLayout.PREFERRED_SIZE)
+                    .addGroup(jPanel6Layout.createSequentialGroup()
+                        .addComponent(ZPositionLabel)
+                        .addGap(9, 9, 9)))
                 .addContainerGap())
         );
         jPanel6Layout.setVerticalGroup(
@@ -1223,10 +1228,14 @@ public class ILEMControlFrame extends javax.swing.JFrame {
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addComponent(ZSmallUp, javax.swing.GroupLayout.PREFERRED_SIZE, 16, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                .addComponent(ZPositionLabel)
+                .addGap(52, 52, 52)
                 .addComponent(ZSmallDown, javax.swing.GroupLayout.PREFERRED_SIZE, 16, javax.swing.GroupLayout.PREFERRED_SIZE)
                 .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
                 .addComponent(ZBigDown, javax.swing.GroupLayout.PREFERRED_SIZE, 24, javax.swing.GroupLayout.PREFERRED_SIZE))
         );
+
+        ZPositionLabel.getAccessibleContext().setAccessibleName("ZPositionLabel");
 
         jLabel3.setHorizontalAlignment(javax.swing.SwingConstants.CENTER);
         jLabel3.setText("Focus Control");
@@ -2749,7 +2758,7 @@ public class ILEMControlFrame extends javax.swing.JFrame {
         updateMovementFields();
         try {
             positionTimer.stop();
-            core_.setRelativeXYPosition(XYStageLabel, x, y);
+            core_.setRelativeXYPosition(SampleXYLabel, x, y);
             positionTimer.start();
         } catch (Exception e) {
             gui_.logError(e);
@@ -2760,7 +2769,7 @@ public class ILEMControlFrame extends javax.swing.JFrame {
         updateMovementFields();
         try {
             positionTimer.stop();
-            core_.setRelativePosition(ZStageLabel, z);
+            core_.setRelativePosition(ObjectiveZLabel, z);
             positionTimer.start();
         } catch (Exception e) {
             gui_.logError(e);
@@ -2771,19 +2780,19 @@ public class ILEMControlFrame extends javax.swing.JFrame {
     private void setRelativeLRStagePosition(double x, double y) {
         updateMovementFields();
         try {
-            core_.setXYStageDevice(LRStageLabel);
+            core_.setXYStageDevice(ObjectiveXYLabel);
         } catch (Exception e) {
             gui_.logError(e);
         }
         try {
             positionTimer.stop();
-            core_.setRelativeXYPosition(LRStageLabel, x, y);
+            core_.setRelativeXYPosition(ObjectiveXYLabel, x, y);
             positionTimer.start();
         } catch (Exception e) {
             gui_.logError(e);
         }
         try {
-            core_.setXYStageDevice(XYStageLabel);
+            core_.setXYStageDevice(SampleXYLabel);
         } catch (Exception e) {
             gui_.logError(e);
         }
@@ -3452,7 +3461,7 @@ public class ILEMControlFrame extends javax.swing.JFrame {
 
     private void ZUpSliderMouseReleased(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_ZUpSliderMouseReleased
         try {
-            core_.setProperty(ZStageLabel, "Step Voltage P", ZUpSlider.getValue());
+            core_.setProperty(ObjectiveZLabel, "Step Voltage P", ZUpSlider.getValue());
         } catch (Exception e) {
             gui_.logError(e);
         }        // TODO add your handling code here:
@@ -3461,7 +3470,7 @@ public class ILEMControlFrame extends javax.swing.JFrame {
     private void ZDownSliderMouseReleased(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_ZDownSliderMouseReleased
         // TODO add your handling code here:
         try {
-            core_.setProperty(ZStageLabel, "Step Voltage N", ZDownSlider.getValue());
+            core_.setProperty(ObjectiveZLabel, "Step Voltage N", ZDownSlider.getValue());
         } catch (Exception e) {
             gui_.logError(e);
         }
@@ -3471,7 +3480,7 @@ public class ILEMControlFrame extends javax.swing.JFrame {
         // TODO add your handling code here:
         try {
             positionTimer.stop();
-            core_.setProperty(ZStageLabel, "Fine Voltage", ZFineSlider.getValue());
+            core_.setProperty(ObjectiveZLabel, "Fine Voltage", ZFineSlider.getValue());
             positionTimer.start();
         } catch (Exception e) {
             gui_.logError(e);
@@ -3781,8 +3790,8 @@ public class ILEMControlFrame extends javax.swing.JFrame {
         
         try {
 
-            Xpos = core_.getXPosition(XYStageLabel);
-            Ypos = core_.getYPosition(XYStageLabel);
+            Xpos = core_.getXPosition(SampleXYLabel);
+            Ypos = core_.getYPosition(SampleXYLabel);
 
         } catch (Exception e) {
             gui_.logError(e);
@@ -3938,6 +3947,7 @@ public class ILEMControlFrame extends javax.swing.JFrame {
     private javax.swing.JButton ZBigUp;
     private javax.swing.JSlider ZDownSlider;
     private javax.swing.JSlider ZFineSlider;
+    private javax.swing.JLabel ZPositionLabel;
     private javax.swing.JButton ZSmallDown;
     private javax.swing.JTextField ZSmallStepsSet;
     private javax.swing.JButton ZSmallUp;
