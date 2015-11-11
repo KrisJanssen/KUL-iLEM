@@ -85,6 +85,7 @@ CSECOMStageHub::CSECOMStageHub()
 	, initialized_(false)
 	, interfaceParameter_("PI E-861 PiezoWalk(R) Controller SN 0112000802")
 	, isSerialBusy_(false)
+	, slewrate_(1.0)
 {
 	portAvailable_ = false;
 
@@ -118,6 +119,9 @@ void CSECOMStageHub::GetName(char* name) const
 // TODO: Check if we can add "real" functionality here.
 bool CSECOMStageHub::Busy()
 {
+	/*int ready = 0;
+	IsControllerReady_(ID_, &ready);
+	return (bool)ready;*/
 	return false;
 }
 
@@ -223,6 +227,10 @@ int CSECOMStageHub::Initialize()
     std::string answer("");
 
 	ret = qGCSCommand("*IDN?", answer);
+
+	unsigned int param = 0x7000002;
+
+	ret = qSPA_(ID_, "1", &param, &slewrate_, NULL, MM::MaxStrLength);
 
 	// We got here without errors o all is well.
 	initialized_ = true;
@@ -445,13 +453,15 @@ int CSECOMStageHub::LoadDLL(const std::string & dllName)
 	}
 
 	// Assign the Function Pointers with the correct addresses.
-	IsConnected_ = (FP_IsConnected)LoadDLLFunc("IsConnected");
 	CloseConnection_ = (FP_CloseConnection)LoadDLLFunc("CloseConnection");
-	EnumerateUSB_ = (FP_EnumerateUSB)LoadDLLFunc("EnumerateUSB");
 	ConnectUSB_ = (FP_ConnectUSB)LoadDLLFunc("ConnectUSB");
+	EnumerateUSB_ = (FP_EnumerateUSB)LoadDLLFunc("EnumerateUSB");
 	GcsCommandset_ = (FP_GcsCommandset)LoadDLLFunc("GcsCommandset");
 	GcsGetAnswerSize_ = (FP_GcsGetAnswerSize)LoadDLLFunc("GcsGetAnswerSize");
 	GcsGetAnswer_ = (FP_GcsGetAnswer)LoadDLLFunc("GcsGetAnswer");
+	IsConnected_ = (FP_IsConnected)LoadDLLFunc("IsConnected");
+	IsControllerReady_ = (FP_IsControllerReady)LoadDLLFunc("IsControllerReady");
+	qSPA_ = (FP_qSPA)LoadDLLFunc("qSPA");
 
 	// Return OK.
 	return DEVICE_OK;
@@ -780,13 +790,9 @@ int CSECOMStageXY::SetPositionSteps(long x, long y)
 			command << " SSA 1 " << val;
 			hub->GCSCommand(command.str().c_str());
 		}
-		//	   command.str("");
-		//	   command.clear();
-		//	   command << "2 RNP 1 0";  
-		//	   hub->SendGCSCommand(command.str());
+
 		command.str("");
 		command.clear();
-		//command << "2 OSM 1 " << x;
 		command << addressX_;
 		command << " OSM 1 " << x;
 		hub->GCSCommand(command.str().c_str());
@@ -799,7 +805,6 @@ int CSECOMStageXY::SetPositionSteps(long x, long y)
 			GetProperty("Step Voltage YP", val);
 			command.str("");
 			command.clear();
-			//command << "1 SSA 1 " << val;
 			command << addressY_;
 			command << " SSA 1 " << val;
 			hub->GCSCommand(command.str().c_str());
@@ -809,18 +814,13 @@ int CSECOMStageXY::SetPositionSteps(long x, long y)
 			GetProperty("Step Voltage YN", val);
 			command.str("");
 			command.clear();
-			//command << "1 SSA 1 " << val;
 			command << addressY_;
 			command << " SSA 1 " << val;
 			hub->GCSCommand(command.str().c_str());
 		}
-		//	   command.str("");
-		//	   command.clear();
-		//	   command << "1 RNP 1 0";  
-		//	   hub->SendGCSCommand(command.str());
+
 		command.str("");
 		command.clear();
-		//command << "1 OSM 1 " << y;
 		command << addressY_;
 		command << " OSM 1 " << y;
 		hub->GCSCommand(command.str().c_str());
@@ -844,9 +844,10 @@ double CSECOMStageXY::GetStepSize()
 
 int CSECOMStageXY::Home()
 {
+	// TODO: check hardware support for homing.
 	if (supportsPositionFeedback_)
 	{
-		CSECOMStageHub* hub = static_cast<CSECOMStageHub*>(GetParentHub());
+		/*CSECOMStageHub* hub = static_cast<CSECOMStageHub*>(GetParentHub());
 		std::ostringstream command;
 		command.str("");
 		command.clear();
@@ -864,15 +865,17 @@ int CSECOMStageXY::Home()
 		command.clear();
 		command << addressY_ << " FRF 1";
 		hub->GCSCommand(command.str().c_str());
-		//command << "4 POS 1 " << xOrigin_ / 1000;
+
 		command << addressX_ << " POS 1 " << xOrigin_ / 1000;
 		hub->GCSCommand(command.str().c_str());
 		command.str("");
 		command.clear();
-		//command << "5 POS 1 " << yOrigin_ / 1000;
+
 		command << addressY_ << " POS 1 " << yOrigin_ / 1000;
 		hub->GCSCommand(command.str().c_str());
-		return DEVICE_OK;
+		return DEVICE_OK;*/
+
+		return DEVICE_UNSUPPORTED_COMMAND;
 	}
 	else
 	{
@@ -906,14 +909,50 @@ int CSECOMStageXY::SetRelativePositionUm(double dx, double dy)
 
 		dx = dx / 1000;
 		dy = dy / 1000;
+
+		command.str("");
+		command.clear();
+		command << addressX_ << " SVO 1 1";
+		hub->GCSCommand(command.str().c_str());
+		Sleep(hub->WaitingTime());
+		command.str("");
+		command.clear();
+		command << addressX_ << " RON 1 0";
+		hub->GCSCommand(command.str().c_str());
+		Sleep(hub->WaitingTime());
+
+		command.str("");
+		command.clear();
+		command << addressY_ << " SVO 1 1";
+		hub->GCSCommand(command.str().c_str());
+		Sleep(hub->WaitingTime());
+		command.str("");
+		command.clear();
+		command << addressX_ << " RON 1 0";
+		hub->GCSCommand(command.str().c_str());
+		Sleep(hub->WaitingTime());
+
 		command.str("");
 		command.clear();
 		command << addressX_ << " MVR 1 " << dx;
 		hub->GCSCommand(command.str().c_str());
+		Sleep(hub->WaitingTime() * 2.0);
 		command.str("");
 		command.clear();
 		command << addressY_ << " MVR 1 " << dy;
 		hub->GCSCommand(command.str().c_str());
+		Sleep(hub->WaitingTime() * 2.0);
+
+		command.str("");
+		command.clear();
+		command << addressX_ << " SVO 1 0";
+		hub->GCSCommand(command.str().c_str());
+		Sleep(hub->WaitingTime());
+		command.str("");
+		command.clear();
+		command << addressY_ << " SVO 1 0";
+		hub->GCSCommand(command.str().c_str());
+		Sleep(hub->WaitingTime());
 
 		return DEVICE_OK;
 	}
@@ -1000,7 +1039,8 @@ int CSECOMStageXY::GetPositionUm(double &dx, double &dy)
 	}
 	else
 	{
-		return DEVICE_UNSUPPORTED_COMMAND;
+		// We silently continue.
+		return DEVICE_OK;
 	}
 }
 
@@ -1220,15 +1260,36 @@ int CSECOMStageZ::SetPositionUm(double pos)
 	return DEVICE_OK;
 }
 
-int CSECOMStageZ::SetRelativePositionUm(double &pos)
+int CSECOMStageZ::SetRelativePositionUm(double pos)
 {
 	CSECOMStageHub* hub = static_cast<CSECOMStageHub*>(GetParentHub());
 	std::ostringstream command;
 	pos = pos / 1000;
+
+	command.str("");
+	command.clear();
+	command << "3 SVO 1 1";
+	hub->GCSCommand(command.str().c_str());
+	Sleep(hub->WaitingTime());
+
+	command.str("");
+	command.clear();
+	command << "3 RON 1 0";
+	hub->GCSCommand(command.str().c_str());
+	Sleep(hub->WaitingTime());
+
 	command.str("");
 	command.clear();
 	command << "3 MVR 1 " << pos;
 	hub->GCSCommand(command.str().c_str());
+	Sleep(hub->WaitingTime() * 5);
+
+	command.str("");
+	command.clear();
+	command << "3 SVO 1 0";
+	hub->GCSCommand(command.str().c_str());
+	Sleep(hub->WaitingTime());
+
 	return DEVICE_OK;
 }
 

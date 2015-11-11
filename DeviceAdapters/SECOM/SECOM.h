@@ -28,6 +28,7 @@
     of a key value and a mapped value, following a specific order.
 */
 #include "../../micromanager/MMDevice/DeviceBase.h"
+#include "../../micromanager/MMDevice/DeviceThreads.h"
 #include <string>
 #include <map>
 
@@ -79,6 +80,8 @@ public:
 	bool GCSCommand(const char* command);
 	bool qGCSCommand(const char* command, std::string& answer);
 
+	double WaitingTime() { return slewrate_ * 5.0; }
+
 	/*bool GCSCommandWithAnswer(const std::string command, std::vector<std::string>& answer, int nExpectedLines = -1);
 	bool GCSCommandWithAnswer(unsigned char singleByte, std::vector<std::string>& answer, int nExpectedLines = -1);
 	bool SendGCSCommand(const std::string command);
@@ -87,21 +90,25 @@ public:
 	int GetLastError() const { return lastError_; };
 
 private:
-	typedef int (WINAPI *FP_IsConnected) (int);
 	typedef int (WINAPI *FP_CloseConnection) (int);
-	typedef int (WINAPI *FP_EnumerateUSB) (char*, long, const char*);
 	typedef int (WINAPI *FP_ConnectUSB) (const char*);
+	typedef int (WINAPI *FP_EnumerateUSB) (char*, long, const char*);
 	typedef int (WINAPI *FP_GcsCommandset) (int, const char*);
 	typedef int (WINAPI *FP_GcsGetAnswer) (int, char*, int);
 	typedef int (WINAPI *FP_GcsGetAnswerSize) (int, int*);
-
-	FP_IsConnected IsConnected_;
+	typedef int (WINAPI *FP_IsConnected) (int);
+	typedef int (WINAPI *FP_IsControllerReady) (int, int*);
+	typedef int (WINAPI *FP_qSPA) (int, const char*, unsigned int*, double*, char*, int);
+	
 	FP_CloseConnection CloseConnection_;
-	FP_EnumerateUSB EnumerateUSB_;
 	FP_ConnectUSB ConnectUSB_;
+	FP_EnumerateUSB EnumerateUSB_;
 	FP_GcsCommandset GcsCommandset_;
 	FP_GcsGetAnswer GcsGetAnswer_;
 	FP_GcsGetAnswerSize GcsGetAnswerSize_;
+	FP_IsConnected IsConnected_;
+	FP_IsControllerReady IsControllerReady_;
+	FP_qSPA qSPA_;
 
 	int LoadDLL(const std::string& dllName);
 	void* LoadDLLFunc(const char* funcName);
@@ -111,6 +118,7 @@ private:
 	std::string controllerType_, dllName_, dllPrefix_, interfaceParameter_;
 	bool initialized_, portAvailable_, isSerialBusy_;
 	int lastError_, ID_;
+	double slewrate_;
 
 
 #ifdef WIN32
@@ -234,24 +242,24 @@ public:
 	bool Busy();
 
 	// Stage API
-	int SetPositionUm(double pos);
-	int GetPositionUm(double& pos);
-	int SetRelativePositionUm(double& pos);
-	double GetStepSize() { return 1.0; }
-	int GetPositionSteps(long& steps)
+	virtual int SetPositionUm(double pos);
+	virtual int GetPositionUm(double& pos);
+	virtual int SetRelativePositionUm(double pos);
+	virtual double GetStepSize() { return 1.0; }
+	virtual int GetPositionSteps(long& steps)
 	{
 		steps = 0;
 		return DEVICE_OK;
 	}
-	int SetPositionSteps(long steps);
-	int SetOrigin() { return DEVICE_OK; }
-	int GetLimits(double& lower, double& upper)
+	virtual int SetPositionSteps(long steps);
+	virtual int SetOrigin() { return DEVICE_OK; }
+	virtual int GetLimits(double& lower, double& upper)
 	{
 		lower = -1.0;
 		upper = 1.0;
 		return DEVICE_OK;
 	}
-	int Move(double /*v*/) { return DEVICE_OK; }
+	virtual int Move(double /*v*/) { return DEVICE_OK; }
 	int IsStageSequenceable(bool& isSequenceable) const { isSequenceable = false; return DEVICE_OK; }
 	bool IsContinuousFocusDrive() const { return false; }
 
