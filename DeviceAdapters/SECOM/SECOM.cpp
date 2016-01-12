@@ -81,7 +81,7 @@ MODULE_API void DeleteDevice(MM::Device* pDevice)
 */
 CSECOMStageHub::CSECOMStageHub()
 	: controllerType_("E-861")
-	, dllName_("PI_GCS2_DLL.dll")
+	, dllName_("PI_GCS2_DLL_X64.dll")
 	, initialized_(false)
 	, interfaceParameter_("PI E-861 PiezoWalk(R) Controller SN 0112000802")
 	, isSerialBusy_(false)
